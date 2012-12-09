@@ -4,7 +4,7 @@ import urllib, urllib2
 import json
 import datetime, uuid
 import base64
-import zipfile
+import contextlib, cStringIO, zipfile
 from bs4 import BeautifulSoup
 import Image
 
@@ -16,8 +16,15 @@ titles_filename    = 'titles.json'
 comments_filename  = 'comments.json'
 
 skipped_comics = set((404, ))
+# Guest Week: Zach Weiner (SMBC) (#826) contains way more than
+# just one image.
+# Umwelt (#1037) is a comic that can be normally viewed only
+# from a browser since the image is loaded dynamically and is
+# based on a number of parameters such as your referer, browser,
+# location, ISP, etc.
+# Click and Drag (#1110) is also hard to embed in e-book format.
 
-comics_per_file = 2000
+comics_per_file = 1000
 create_zip = True
 
 def get_soup(address):
@@ -171,20 +178,21 @@ def write_binary(file_obj, filename):
     binary = binary_template.format(fixed_filename=fix_filename(filename), **locals()) # content_type, binary_data)
     file_obj.write(binary.encode('utf-8'))
 
-def make_fb2(fb2_filename, comic_from, comic_to, sequence_number):
+def make_fb2(buff, comic_from, comic_to, sequence_number):
     filenames, titles, comments = download_comics(comic_from, comic_to)
-    with open(fb2_filename, 'w') as fb2_file:
-        write_header(fb2_file, comic_from, comic_to, sequence_number)
-        for number in xrange(comic_from, comic_to + 1):
-            if number in skipped_comics:
-                continue
-            write_section(fb2_file, number, titles[number], filenames[number], comments[number])
-        fb2_file.write(u'</body>\n')
-        for number in xrange(comic_from, comic_to + 1):
-            if number in skipped_comics:
-                continue
-            write_binary(fb2_file, filenames[number])
-        fb2_file.write(u'</FictionBook>')
+    print 'Download complete. Building FB2 in-memory...',
+    write_header(buff, comic_from, comic_to, sequence_number)
+    for number in xrange(comic_from, comic_to + 1):
+        if number in skipped_comics:
+            continue
+        write_section(buff, number, titles[number], filenames[number], comments[number])
+    buff.write(u'</body>\n')
+    for number in xrange(comic_from, comic_to + 1):
+        if number in skipped_comics:
+            continue
+        write_binary(buff, filenames[number])
+    buff.write(u'</FictionBook>')
+    print 'done.'
 
 
 if __name__ == '__main__':
@@ -195,19 +203,25 @@ if __name__ == '__main__':
 
     total_comics = get_number_of_comics()
     number_length = len(str(total_comics)) # Don't want to import math
-    fb2_filename_template = os.path.join(output_dir, 'xkcd_%0{n}d-%0{n}d.fb2'.format(n=number_length))
+    fb2_filename_template = 'xkcd_%0{n}d-%0{n}d.fb2'.format(n=number_length)
     
     for comic_from in xrange(1, total_comics + 1, comics_per_file):
         comic_to = min(total_comics, comic_from + comics_per_file - 1)
         fb2_filename = fb2_filename_template % (comic_from, comic_to)
         sequence_number = (comic_from + comics_per_file - 1) // comics_per_file
-        print 'Writing %s...' % fb2_filename
-        make_fb2(fb2_filename, comic_from, comic_to, sequence_number)
 
-        if create_zip:
-            zip_filename = fb2_filename + '.zip'
-            fb2_arcname = os.path.basename(fb2_filename)
-            with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zf:
-                zf.write(fb2_filename, fb2_arcname)
-
-            os.remove(fb2_filename)
+        with contextlib.closing(cStringIO.StringIO()) as buff:
+            make_fb2(buff, comic_from, comic_to, sequence_number)
+        
+            if create_zip:
+                zip_filename = fb2_filename + '.zip'
+                zip_path = os.path.join(output_dir, zip_filename)
+                print 'Writing %s...' % zip_path,
+                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                    zip_file.writestr(fb2_filename, buff.getvalue())
+            else:
+                fb2_path = os.path.join(output_dir, fb2_filename)
+                print 'Writing %s...' % fb2_path,
+                with open(fb2_path, 'w') as fb2_file:
+                    fb2_file.write(buff.getvalue())
+        print 'done.'
