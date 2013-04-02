@@ -41,14 +41,20 @@ def get_number_of_comics():
 
 def download_comic(number, filenames, titles, comments):
     if number in skipped_comics:
-        return
+        return False
     if (number in filenames
      and number in titles
      and number in comments
      and os.path.exists(os.path.join(comics_dir, filenames[number]))):
-        return
+        return False
 
-    soup = get_soup('http://xkcd.com/%d/' % number)
+    try:
+        soup = get_soup('http://xkcd.com/%d/' % number)
+    except urllib2.URLError as e:
+        print 'Failed to download the page for comic #%d, it will be ignored from now on...'
+        skipped_comics.add(number)
+        return False
+        
     comic = soup.find('div', id='comic')
 
     comic_src = comic.img['src']
@@ -67,6 +73,8 @@ def download_comic(number, filenames, titles, comments):
     titles[number]    = comic_title
     comments[number]  = comic_comment
 
+    return True
+
 def load_dictionary(src_filename):
     result = {}
     if os.path.exists(src_filename):
@@ -83,14 +91,15 @@ def download_comics(number_from, number_to):
     titles    = load_dictionary(titles_filename)
     comments  = load_dictionary(comments_filename)
 
+    downloaded_something = False
     for number in xrange(number_from, number_to + 1):
-        download_comic(number, filenames, titles, comments)
+        downloaded_something |= download_comic(number, filenames, titles, comments)
 
     save_dictionary(filenames_filename, filenames)
     save_dictionary(titles_filename, titles)
     save_dictionary(comments_filename, comments)
 
-    return filenames, titles, comments
+    return downloaded_something, filenames, titles, comments
 
 header_template = u'''\
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -178,9 +187,16 @@ def write_binary(file_obj, filename):
     binary = binary_template.format(fixed_filename=fix_filename(filename), **locals()) # content_type, binary_data)
     file_obj.write(binary.encode('utf-8'))
 
-def make_fb2(buff, comic_from, comic_to, sequence_number):
-    filenames, titles, comments = download_comics(comic_from, comic_to)
-    print 'Download complete. Building FB2 in-memory...',
+def make_fb2(buff, comic_from, comic_to, sequence_number, force_build):
+    print 'Downloading comics %d-%d...' % (comic_from, comic_to),
+    downloaded_something, filenames, titles, comments = download_comics(comic_from, comic_to)
+    if downloaded_something:
+        print 'download complete.'
+    else:
+        print 'nothing new was downloaded.'
+        if not force_build:
+            return False
+    print 'Building FB2 in-memory...',
     write_header(buff, comic_from, comic_to, sequence_number)
     for number in xrange(comic_from, comic_to + 1):
         if number in skipped_comics:
@@ -193,6 +209,7 @@ def make_fb2(buff, comic_from, comic_to, sequence_number):
         write_binary(buff, filenames[number])
     buff.write(u'</FictionBook>')
     print 'done.'
+    return True
 
 
 if __name__ == '__main__':
@@ -206,22 +223,28 @@ if __name__ == '__main__':
     fb2_filename_template = 'xkcd_%0{n}d-%0{n}d.fb2'.format(n=number_length)
     
     for comic_from in xrange(1, total_comics + 1, comics_per_file):
-        comic_to = min(total_comics, comic_from + comics_per_file - 1)
-        fb2_filename = fb2_filename_template % (comic_from, comic_to)
-        sequence_number = (comic_from + comics_per_file - 1) // comics_per_file
+        comic_to       = min(total_comics, comic_from + comics_per_file - 1)
+        sequence_index = (comic_from + comics_per_file - 1) // comics_per_file
+        book_filename  = fb2_filename_template % (comic_from, comic_to)
+        book_path      = os.path.join(output_dir, book_filename)
+
+        if create_zip:
+            book_filename = book_filename + '.zip'
+            book_path     = book_path + '.zip'
+
+        force_build = not os.path.exists(book_path)
 
         with contextlib.closing(cStringIO.StringIO()) as buff:
-            make_fb2(buff, comic_from, comic_to, sequence_number)
+            success = make_fb2(buff, comic_from, comic_to, sequence_index, force_build)
+            
+            if not success:
+                continue
         
+            print 'Writing %s...' % book_path,
             if create_zip:
-                zip_filename = fb2_filename + '.zip'
-                zip_path = os.path.join(output_dir, zip_filename)
-                print 'Writing %s...' % zip_path,
-                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-                    zip_file.writestr(fb2_filename, buff.getvalue())
+                with zipfile.ZipFile(book_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                    zip_file.writestr(book_filename, buff.getvalue())
             else:
-                fb2_path = os.path.join(output_dir, fb2_filename)
-                print 'Writing %s...' % fb2_path,
-                with open(fb2_path, 'w') as fb2_file:
+                with open(book_path, 'w') as fb2_file:
                     fb2_file.write(buff.getvalue())
         print 'done.'
