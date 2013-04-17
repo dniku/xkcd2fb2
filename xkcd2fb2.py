@@ -23,6 +23,7 @@ skipped_comics = set((404, ))
 # based on a number of parameters such as your referer, browser,
 # location, ISP, etc.
 # Click and Drag (#1110) is also hard to embed in e-book format.
+# Externalities (#1193) contains regular text and multiple images.
 
 comics_per_file = 1000
 create_zip = True
@@ -191,7 +192,7 @@ def make_fb2(buff, comic_from, comic_to, sequence_number, force_build):
     print 'Downloading comics %d-%d...' % (comic_from, comic_to),
     downloaded_something, filenames, titles, comments = download_comics(comic_from, comic_to)
     if downloaded_something:
-        print 'download complete.'
+        print 'Download complete.'
     else:
         print 'nothing new was downloaded.'
         if not force_build:
@@ -225,9 +226,11 @@ if __name__ == '__main__':
     for comic_from in xrange(1, total_comics + 1, comics_per_file):
         comic_to       = min(total_comics, comic_from + comics_per_file - 1)
         sequence_index = (comic_from + comics_per_file - 1) // comics_per_file
-        book_filename  = fb2_filename_template % (comic_from, comic_to)
-        book_path      = os.path.join(output_dir, book_filename)
+        fb2_filename   = fb2_filename_template % (comic_from, comic_to)
+        fb2_path       = os.path.join(output_dir, fb2_filename)
 
+        book_filename  = fb2_filename
+        book_path      = fb2_path
         if create_zip:
             book_filename = book_filename + '.zip'
             book_path     = book_path + '.zip'
@@ -243,8 +246,9 @@ if __name__ == '__main__':
             print 'Writing %s...' % book_path,
             if create_zip:
                 with zipfile.ZipFile(book_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-                    zip_file.writestr(book_filename, buff.getvalue())
+                    zip_file.writestr(fb2_filename, buff.getvalue())
             else:
                 with open(book_path, 'w') as fb2_file:
                     fb2_file.write(buff.getvalue())
+        
         print 'done.'
