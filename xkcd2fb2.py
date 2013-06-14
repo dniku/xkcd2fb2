@@ -55,7 +55,7 @@ def download_comic(number, filenames, titles, comments):
         print 'Failed to download the page for comic #%d, it will be ignored from now on...'
         skipped_comics.add(number)
         return False
-        
+
     comic = soup.find('div', id='comic')
 
     comic_src = comic.img['src']
@@ -94,7 +94,8 @@ def download_comics(number_from, number_to):
 
     downloaded_something = False
     for number in xrange(number_from, number_to + 1):
-        downloaded_something |= download_comic(number, filenames, titles, comments)
+        success = download_comic(number, filenames, titles, comments)
+        downloaded_something |= success
 
     save_dictionary(filenames_filename, filenames)
     save_dictionary(titles_filename, titles)
@@ -136,7 +137,9 @@ def write_header(file_obj, comic_from, comic_to, sequence_number):
     today = datetime.date.today()
     today_iso = today.isoformat()
     today_human = today.strftime('%d %B %Y')
-    header = header_template.format(**locals()) # today_iso, today_human, document_id, comic_from, comic_to, sequence_number
+    # locals() provides these fields: today_iso, today_human,
+    # document_id, comic_from, comic_to, sequence_number
+    header = header_template.format(**locals())
     file_obj.write(header.encode('utf-8'))
 
 def fix_filename(filename):
@@ -156,14 +159,16 @@ def write_section(file_obj, number, title, filename, comment):
     # FB2 does not support GIF.
     # Therefore, all *.gif images have to be converted.
     # The conversion itself will be performed later.
-    # But we're changing the filename the comic refers to to reflect that the image will no longer be in GIF format.
-    
+    # But we're changing the filename the comic refers to
+    # to reflect that the image will no longer be in GIF format.
+
     basename, extension = os.path.splitext(filename)
     if extension == '.gif':
         extension = '.png'
         filename = basename + extension
-    
-    section = section_template.format(fixed_filename=fix_filename(filename), **locals()) # number, title, comment
+
+    # locals() provides these fields: number, title, comment
+    section = section_template.format(fixed_filename=fix_filename(filename), **locals())
     file_obj.write(section.encode('utf-8'))
 
 binary_template = u'''\
@@ -175,7 +180,8 @@ def write_binary(file_obj, filename):
     basename, extension = os.path.splitext(filename)
     filepath = os.path.join(comics_dir, filename)
 
-    if extension == '.gif': # From #961
+    # GIF is used, for example, in #961
+    if extension == '.gif':
         im = Image.open(filepath)
         extension = '.png'
         filename = basename + extension
@@ -185,7 +191,8 @@ def write_binary(file_obj, filename):
     content_type = {'.jpg': u'image/jpeg', '.png': u'image/png'}[extension]
     with open(filepath, 'rb') as f:
         binary_data = base64.b64encode(f.read())
-    binary = binary_template.format(fixed_filename=fix_filename(filename), **locals()) # content_type, binary_data)
+    # locals() provides these fields: content_type, binary_data
+    binary = binary_template.format(fixed_filename=fix_filename(filename), **locals())
     file_obj.write(binary.encode('utf-8'))
 
 def make_fb2(buff, comic_from, comic_to, sequence_number, force_build):
@@ -194,7 +201,7 @@ def make_fb2(buff, comic_from, comic_to, sequence_number, force_build):
     if downloaded_something:
         print 'Download complete.'
     else:
-        print 'nothing new was downloaded.'
+        print 'nothing new has been downloaded.'
         if not force_build:
             return False
     print 'Building FB2 in-memory...',
@@ -220,9 +227,9 @@ if __name__ == '__main__':
         os.makedirs(output_dir)
 
     total_comics = get_number_of_comics()
-    number_length = len(str(total_comics)) # Don't want to import math
+    number_length = len(str(total_comics))  # don't want to import math
     fb2_filename_template = 'xkcd_%0{n}d-%0{n}d.fb2'.format(n=number_length)
-    
+
     for comic_from in xrange(1, total_comics + 1, comics_per_file):
         comic_to       = min(total_comics, comic_from + comics_per_file - 1)
         sequence_index = (comic_from + comics_per_file - 1) // comics_per_file
@@ -239,10 +246,10 @@ if __name__ == '__main__':
 
         with contextlib.closing(cStringIO.StringIO()) as buff:
             success = make_fb2(buff, comic_from, comic_to, sequence_index, force_build)
-            
+
             if not success:
                 continue
-        
+
             print 'Writing %s...' % book_path,
             if create_zip:
                 with zipfile.ZipFile(book_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
@@ -250,5 +257,5 @@ if __name__ == '__main__':
             else:
                 with open(book_path, 'w') as fb2_file:
                     fb2_file.write(buff.getvalue())
-        
+
         print 'done.'
